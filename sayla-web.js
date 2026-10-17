@@ -200,29 +200,55 @@
     scanner.onCode = onCode;
     scannerMove(x, y, w, h);
     scanner.box.style.display = "block";
-    if (!scanner.started) {
-      if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        showScannerMessage("Kamera diňe howpsuz (https) salgyda işleýär. Synag salgysynda kamera ýok — hakyky saýtda işlär.");
-        return;
+    if (!scanner.started) startDecoding();
+  }
+
+  function startDecoding() {
+    if (!scanner) return;
+    if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showScannerMessage("Kamera diňe howpsuz (https) salgyda işleýär. Synag salgysynda kamera ýok — hakyky saýtda işlär.");
+      return;
+    }
+    scanner.message.style.display = "none";
+    scanner.started = true;
+    scanner.reader.decodeFromConstraints(
+      { video: { facingMode: { ideal: "environment" } } },
+      scanner.video,
+      function (result) {
+        if (result && scanner && scanner.onCode) scanner.onCode(result.getText());
       }
-      scanner.started = true;
-      scanner.reader.decodeFromConstraints(
-        { video: { facingMode: { ideal: "environment" } } },
-        scanner.video,
-        function (result) {
-          if (result && scanner && scanner.onCode) scanner.onCode(result.getText());
-        }
-      ).catch(function (e) {
-        if (!scanner) return;
-        scanner.started = false;
-        if (e && (e.name === "NotAllowedError" || e.name === "SecurityError")) {
-          showScannerMessage("Kamera rugsady berilmedi. iPhone-da: Sazlamalar → Safari → Kamera → «Sora» ýa-da «Rugsat ber».");
-        } else {
-          showScannerMessage("Kamera açylmady: " + (e && e.message || e));
-        }
-      });
+    ).catch(function (e) {
+      if (!scanner) return;
+      scanner.started = false;
+      if (e && (e.name === "NotAllowedError" || e.name === "SecurityError")) {
+        showScannerMessage("Kamera rugsady berilmedi. iPhone-da: Sazlamalar → Safari → Kamera → «Sora» ýa-da «Rugsat ber».");
+      } else {
+        showScannerMessage("Kamera açylmady: " + (e && e.message || e));
+      }
+    });
+  }
+
+  function streamIsLive() {
+    const stream = scanner && scanner.video.srcObject;
+    return !!stream && stream.getVideoTracks().some(function (t) { return t.readyState === "live"; });
+  }
+
+  // iPhone programma fona geçende kamerany öçürýär; görnende täzeden açýarys (ýogsam gara ekran)
+  function resumeCamera() {
+    if (!scanner || scanner.box.style.display === "none" || !scanner.started) return;
+    if (streamIsLive()) {
+      scanner.video.play().catch(function () {});
+    } else {
+      try { scanner.reader.reset(); } catch (e) {}
+      scanner.started = false;
+      startDecoding();
     }
   }
+
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) resumeCamera();
+  });
+  window.addEventListener("pageshow", resumeCamera);
 
   function showScannerMessage(text) {
     if (!scanner) return;
@@ -251,7 +277,10 @@
   }
 
   function scannerSetVisible(visible) {
-    if (scanner) scanner.box.style.display = visible ? "block" : "none";
+    if (!scanner) return;
+    scanner.box.style.display = visible ? "block" : "none";
+    // Gizlenen wideo iPhone-da togtaýar: görnende ýene oýnat (ýa-da kamerany täzeden aç)
+    if (visible) resumeCamera();
   }
 
   window.SaylaWeb = {

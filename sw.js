@@ -1,22 +1,16 @@
 // Saýla: saýtyň faýllaryny telefonda saklaýar, şonuň üçin internetsiz hem açylýar.
 // Maglumatlar (müşderiler, harytlar) bu ýerde DÄL — olar IndexedDB-de (sayla-web.js).
-// Tertip: öňki saklanany derrew görkez, internet bar bolsa fonda täzele (indiki açylyşda täze wersiýa).
-const CACHE = "sayla-v1";
-const CORE = [
-  "./",
-  "index.html",
-  "sayla-web.js",
-  "zxing.min.js",
-  "sayla.js",
-  "manifest.webmanifest",
-  "icon-180.png",
-  "icon-192.png",
-  "icon-512.png",
-];
+//
+// Her wersiýanyň ähli faýllary bir gezekde (wersiýa ady bilen) saklanýar: täze wersiýa
+// doly ýüklenmese köne wersiýa işlemegini dowam edýär — internetsiz pursatda hem.
+// VERSION we FILES ýerleşdirilende (deploy-web.py) doldurylýar; kompýuterde synagda "dev".
+const VERSION = "45449da38fa7";
+const FILES = ["./", "32051917d97ef3c38004.wasm", "8bc1b48ee28fd6b51bb9.wasm", "composeResources/com.logistika.app.resources/font/roboto_bold.ttf", "composeResources/com.logistika.app.resources/font/roboto_medium.ttf", "composeResources/com.logistika.app.resources/font/roboto_regular.ttf", "icon-180.png", "icon-192.png", "icon-512.png", "index.html", "manifest.webmanifest", "sayla-web.js", "sayla.js", "sayla.js.LICENSE.txt", "zxing.min.js"];
+const CACHE = "sayla-" + VERSION;
 
 self.addEventListener("install", function (event) {
   event.waitUntil(
-    caches.open(CACHE).then(function (cache) { return cache.addAll(CORE); }).then(function () { return self.skipWaiting(); })
+    caches.open(CACHE).then(function (cache) { return cache.addAll(FILES); }).then(function () { return self.skipWaiting(); })
   );
 });
 
@@ -34,11 +28,11 @@ self.addEventListener("fetch", function (event) {
   event.respondWith(
     caches.open(CACHE).then(function (cache) {
       return cache.match(request, { ignoreSearch: true }).then(function (cached) {
-        const network = fetch(request).then(function (response) {
+        if (cached) return cached;
+        return fetch(request).then(function (response) {
           if (response && response.ok) cache.put(request, response.clone());
           return response;
-        }).catch(function () { return cached; });
-        return cached || network;
+        });
       });
     })
   );
