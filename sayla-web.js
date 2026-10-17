@@ -171,6 +171,9 @@
   // ---------- Shtrih-kod skaneri (ZXing) ----------
   // Kamera Compose ekranynyň üstünde aýratyn HTML gatlakda görkezilýär
   let scanner = null;
+  // Kompozable "gizle" diýen bolsa (meselem netije kartoçkasy görkezilýär), ýeri täzelenende
+  // kamera ýene görünmesin
+  let scannerVisible = true;
 
   function scannerShow(x, y, w, h, onCode) {
     if (!scanner) {
@@ -193,16 +196,32 @@
       box.appendChild(reticle);
       box.appendChild(message);
       document.body.appendChild(box);
+      // Has berk gözleg (TRY_HARDER) + diňe biziň ulanýan kod görnüşlerimiz: kargo belliklerindäki
+      // inçe Code128 kodlary hem okalsyn
+      const F = ZXing.BarcodeFormat;
       const hints = new Map();
-      const reader = new ZXing.BrowserMultiFormatReader(hints, 300);
-      scanner = { box: box, video: video, message: message, reader: reader, onCode: onCode, started: false };
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+        F.CODE_128, F.CODE_39, F.CODE_93, F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E,
+        F.ITF, F.CODABAR, F.QR_CODE, F.DATA_MATRIX, F.PDF_417,
+      ]);
+      const reader = new ZXing.MultiFormatReader();
+      reader.setHints(hints);
+      const canvas = document.createElement("canvas");
+      scanner = {
+        box: box, video: video, message: message, reader: reader, onCode: onCode,
+        canvas: canvas, ctx: canvas.getContext("2d", { willReadFrequently: true }),
+        started: false, stream: null, timer: null,
+      };
     }
     scanner.onCode = onCode;
     scannerMove(x, y, w, h);
-    scanner.box.style.display = "block";
+    scanner.box.style.display = scannerVisible ? "block" : "none";
     if (!scanner.started) startDecoding();
   }
 
+  // Kamerany özümiz açýarys we kadrlary özümiz okaýarys (ZXing-iň öz dowamly okaýşy iPhone-da
+  // wideo ölçegi belli bolmanka 0x0 kanwas döredip, hiç zat tapmaýar)
   function startDecoding() {
     if (!scanner) return;
     if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -211,15 +230,20 @@
     }
     scanner.message.style.display = "none";
     scanner.started = true;
-    scanner.reader.decodeFromConstraints(
-      { video: { facingMode: { ideal: "environment" } } },
-      scanner.video,
-      function (result) {
-        if (result && scanner && scanner.onCode) scanner.onCode(result.getText());
-      }
-    ).catch(function (e) {
-      if (!scanner) return;
-      scanner.started = false;
+    const s = scanner;
+    navigator.mediaDevices.getUserMedia({
+      audio: false,
+      // iPhone başda 640x480 berýär: inçe çyzyklar üçin has ýokary çözgüt soraýarys
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+    }).then(function (stream) {
+      if (scanner !== s || !s.started) { stopStream(stream); return; }
+      s.stream = stream;
+      s.video.srcObject = stream;
+      s.video.play().catch(function () {});
+      if (!s.timer) s.timer = setInterval(scanFrame, 150);
+    }).catch(function (e) {
+      if (scanner !== s) return;
+      s.started = false;
       if (e && (e.name === "NotAllowedError" || e.name === "SecurityError")) {
         showScannerMessage("Kamera rugsady berilmedi. iPhone-da: Sazlamalar → Safari → Kamera → «Sora» ýa-da «Rugsat ber».");
       } else {
@@ -228,8 +252,52 @@
     });
   }
 
+  function stopStream(stream) {
+    if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+  }
+
+  function stopDecoding() {
+    if (!scanner) return;
+    if (scanner.timer) { clearInterval(scanner.timer); scanner.timer = null; }
+    stopStream(scanner.stream);
+    scanner.stream = null;
+    scanner.video.srcObject = null;
+    scanner.started = false;
+  }
+
+  // Bir kadr: wideonyň ortasyndaky zolak (ramka düşýän ýer) kesilip okalýar
+  function scanFrame() {
+    const s = scanner;
+    if (!s || !s.stream || s.box.style.display === "none") return;
+    const v = s.video;
+    if (v.readyState < 2 || !v.videoWidth || !v.videoHeight) return;
+    const vw = v.videoWidth, vh = v.videoHeight;
+    const sw = Math.round(vw * 0.9), sh = Math.round(vh * 0.5);
+    const sx = (vw - sw) >> 1, sy = (vh - sh) >> 1;
+    const scale = Math.min(1, 1100 / sw);
+    const cw = Math.max(1, Math.round(sw * scale)), ch = Math.max(1, Math.round(sh * scale));
+    if (s.canvas.width !== cw) s.canvas.width = cw;
+    if (s.canvas.height !== ch) s.canvas.height = ch;
+    s.ctx.drawImage(v, sx, sy, sw, sh, 0, 0, cw, ch);
+    const text = decodeCanvas(s, ZXing.HybridBinarizer) || decodeCanvas(s, ZXing.GlobalHistogramBinarizer);
+    if (text && scanner === s && s.onCode) s.onCode(text);
+  }
+
+  function decodeCanvas(s, Binarizer) {
+    try {
+      const source = new ZXing.HTMLCanvasElementLuminanceSource(s.canvas);
+      const bitmap = new ZXing.BinaryBitmap(new Binarizer(source));
+      const result = s.reader.decodeWithState(bitmap);
+      return result ? result.getText() : null;
+    } catch (e) {
+      return null; // kod tapylmady — indiki kadr
+    } finally {
+      try { s.reader.reset(); } catch (e) {}
+    }
+  }
+
   function streamIsLive() {
-    const stream = scanner && scanner.video.srcObject;
+    const stream = scanner && scanner.stream;
     return !!stream && stream.getVideoTracks().some(function (t) { return t.readyState === "live"; });
   }
 
@@ -238,9 +306,8 @@
     if (!scanner || scanner.box.style.display === "none" || !scanner.started) return;
     if (streamIsLive()) {
       scanner.video.play().catch(function () {});
-    } else {
-      try { scanner.reader.reset(); } catch (e) {}
-      scanner.started = false;
+    } else if (scanner.stream) {
+      stopDecoding();
       startDecoding();
     }
   }
@@ -270,13 +337,15 @@
   }
 
   function scannerHide() {
+    scannerVisible = true;
     if (!scanner) return;
-    try { scanner.reader.reset(); } catch (e) {}
+    stopDecoding();
     scanner.box.remove();
     scanner = null;
   }
 
   function scannerSetVisible(visible) {
+    scannerVisible = visible;
     if (!scanner) return;
     scanner.box.style.display = visible ? "block" : "none";
     // Gizlenen wideo iPhone-da togtaýar: görnende ýene oýnat (ýa-da kamerany täzeden aç)
@@ -305,6 +374,11 @@
     pickBackup: function (onLoaded, onError) { pickFile(".zip,application/zip,application/octet-stream", false, onLoaded, onError, false); },
     shareText: shareText,
     shareFile: shareFile,
+    // iPhone "Вставить" düwmesini görkezýär; ulanyjy basanda tekst gelýär
+    readClipboard: function (onText) {
+      if (!navigator.clipboard || !navigator.clipboard.readText) { onText(""); return; }
+      navigator.clipboard.readText().then(function (t) { onText(t || ""); }, function () { onText(""); });
+    },
     scannerShow: scannerShow,
     scannerMove: scannerMove,
     scannerHide: scannerHide,

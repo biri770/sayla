@@ -4,11 +4,15 @@
 // Her wersiýanyň ähli faýllary bir gezekde (wersiýa ady bilen) saklanýar: täze wersiýa
 // doly ýüklenmese köne wersiýa işlemegini dowam edýär — internetsiz pursatda hem.
 // VERSION we FILES ýerleşdirilende (deploy-web.py) doldurylýar; kompýuterde synagda "dev".
-const VERSION = "45449da38fa7";
-const FILES = ["./", "32051917d97ef3c38004.wasm", "8bc1b48ee28fd6b51bb9.wasm", "composeResources/com.logistika.app.resources/font/roboto_bold.ttf", "composeResources/com.logistika.app.resources/font/roboto_medium.ttf", "composeResources/com.logistika.app.resources/font/roboto_regular.ttf", "icon-180.png", "icon-192.png", "icon-512.png", "index.html", "manifest.webmanifest", "sayla-web.js", "sayla.js", "sayla.js.LICENSE.txt", "zxing.min.js"];
+const VERSION = "6b9622bbf083";
+const FILES = ["./", "693a01c314cc99caddc1.wasm", "8bc1b48ee28fd6b51bb9.wasm", "composeResources/com.logistika.app.resources/font/roboto_bold.ttf", "composeResources/com.logistika.app.resources/font/roboto_medium.ttf", "composeResources/com.logistika.app.resources/font/roboto_regular.ttf", "icon-180.png", "icon-192.png", "icon-512.png", "index.html", "manifest.webmanifest", "sayla-web.js", "sayla.js", "sayla.js.LICENSE.txt", "zxing.min.js"];
 const CACHE = "sayla-" + VERSION;
 
+// Kompýuterdäki synag ("dev"): hiç zat saklanmaýar, hemişe täze faýllar
+const DEV = VERSION === "dev";
+
 self.addEventListener("install", function (event) {
+  if (DEV) { self.skipWaiting(); return; }
   event.waitUntil(
     caches.open(CACHE).then(function (cache) { return cache.addAll(FILES); }).then(function () { return self.skipWaiting(); })
   );
@@ -24,7 +28,7 @@ self.addEventListener("activate", function (event) {
 
 self.addEventListener("fetch", function (event) {
   const request = event.request;
-  if (request.method !== "GET" || new URL(request.url).origin !== self.location.origin) return;
+  if (DEV || request.method !== "GET" || new URL(request.url).origin !== self.location.origin) return;
   event.respondWith(
     caches.open(CACHE).then(function (cache) {
       return cache.match(request, { ignoreSearch: true }).then(function (cached) {
